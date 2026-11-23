@@ -1,18 +1,18 @@
 import axios from "axios";
 
-/** Kunci localStorage tempat token login disimpan. */
 export const TOKEN_KEY = "studytrack_token";
 
-/**
- * Instance axios untuk seluruh pemanggilan API backend.
- * Pada mode development, request `/api/*` di-proxy ke backend oleh Vite
- * (lihat `vite.config.js`).
- */
+function resolveApiBaseUrl() {
+  const raw = import.meta.env.VITE_API_URL?.trim();
+  if (!raw) return "/api";
+  const clean = raw.replace(/\/+$/, "");
+  return clean.endsWith("/api") ? clean : `${clean}/api`;
+}
+
 const api = axios.create({
-  baseURL: "/api"
+  baseURL: resolveApiBaseUrl()
 });
 
-// Menyisipkan token login ke setiap request jika tersedia.
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem(TOKEN_KEY);
   if (token) {
