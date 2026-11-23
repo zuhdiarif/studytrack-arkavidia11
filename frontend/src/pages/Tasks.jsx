@@ -1,30 +1,50 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import api from "../api.js";
 import Navbar from "../components/Navbar.jsx";
 import TaskCard from "../components/TaskCard.jsx";
 
-/**
- * Halaman Daftar Tugas: form tambah tugas dan daftar seluruh tugas pengguna
- * lintas mata kuliah, sesuai urutan yang dikirim backend.
- */
+const AUTO_REFRESH_MS = 5 * 60 * 1000;
+
 export default function Tasks() {
   const [tasks, setTasks] = useState([]);
   const [courses, setCourses] = useState([]);
+  const [serverTime, setServerTime] = useState("");
   const [courseId, setCourseId] = useState("");
   const [judul, setJudul] = useState("");
   const [deskripsi, setDeskripsi] = useState("");
   const [deadline, setDeadline] = useState("");
   const [error, setError] = useState("");
 
-  async function loadData() {
-    const [tasksRes, coursesRes] = await Promise.all([api.get("/tasks"), api.get("/courses")]);
-    setTasks(tasksRes.data.tasks);
-    setCourses(coursesRes.data.courses);
-  }
+  const loadData = useCallback(async () => {
+    try {
+      const [tasksRes, coursesRes] = await Promise.all([
+        api.get("/tasks"),
+        api.get("/courses")
+      ]);
+      setTasks(tasksRes.data.tasks || []);
+      setServerTime(tasksRes.data.server_time || "");
+      setCourses(coursesRes.data.courses || []);
+    } catch (err) {
+      setError(err.response?.data?.error || "Gagal memuat data tugas.");
+    }
+  }, []);
 
   useEffect(() => {
     loadData();
-  }, []);
+
+    const intervalId = setInterval(loadData, AUTO_REFRESH_MS);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        loadData();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [loadData]);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -55,11 +75,43 @@ export default function Tasks() {
     loadData();
   }
 
+  const nearCount = tasks.filter((t) => t.deadline_category === "NEAR").length;
+  const overdueCount = tasks.filter((t) => t.deadline_category === "OVERDUE").length;
+  const normalCount = tasks.filter(
+    (t) => !t.deadline_category || t.deadline_category === "NORMAL"
+  ).length;
+
   return (
     <>
       <Navbar />
       <div className="container">
-        <h1>Daftar Tugas</h1>
+        <div className="page-header">
+          <h1>Daftar Tugas</h1>
+          {serverTime && (
+            <span className="server-clock-meta">
+              Sinkron server:{" "}
+              {new Date(serverTime).toLocaleTimeString("id-ID", {
+                hour: "2-digit",
+                minute: "2-digit"
+              })}
+            </span>
+          )}
+        </div>
+
+        <div className="summary-strip" aria-label="Ringkasan status deadline">
+          <div className="summary-item near">
+            <span className="summary-label">Mendekati Deadline</span>
+            <strong className="summary-count">{nearCount}</strong>
+          </div>
+          <div className="summary-item overdue">
+            <span className="summary-label">Terlambat</span>
+            <strong className="summary-count">{overdueCount}</strong>
+          </div>
+          <div className="summary-item normal">
+            <span className="summary-label">Normal</span>
+            <strong className="summary-count">{normalCount}</strong>
+          </div>
+        </div>
 
         <div className="card">
           <h2>Tambah Tugas</h2>
@@ -68,7 +120,7 @@ export default function Tasks() {
               <option value="">-- Pilih Mata Kuliah --</option>
               {courses.map((c) => (
                 <option key={c.id} value={c.id}>
-                  {c.name}
+                  {c.kode ? `${c.kode} · ${c.name}` : c.name}
                 </option>
               ))}
             </select>
@@ -99,7 +151,12 @@ export default function Tasks() {
         {tasks.length === 0 && <p>Belum ada tugas. Tambahkan tugas pertama Anda di atas.</p>}
 
         {tasks.map((t) => (
-          <TaskCard key={t.id} task={t} onToggleStatus={handleToggleStatus} onDelete={handleDelete} />
+          <TaskCard
+            key={t.id}
+            task={t}
+            onToggleStatus={handleToggleStatus}
+            onDelete={handleDelete}
+          />
         ))}
       </div>
     </>
