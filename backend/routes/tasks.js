@@ -8,6 +8,7 @@ import {
   updateTask
 } from "../db.js";
 import { requireAuth } from "../middleware/auth.js";
+import { generateTaskStudyPlan } from "../services/aiPlanner.js";
 import { enrichAndSortTasks, enrichTaskWithDeadline } from "../utils/deadline.js";
 
 const router = Router();
@@ -36,6 +37,27 @@ router.get("/:id", async (req, res, next) => {
       return res.status(404).json({ error: "Tugas tidak ditemukan." });
     }
     return res.json({ task: enrichTaskWithDeadline(task, new Date()) });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+router.post("/:id/ai-plan", async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ error: "ID tugas tidak valid." });
+    }
+    const task = await findTaskByIdForUser(id, req.user.id);
+    if (!task) {
+      return res.status(404).json({ error: "Tugas tidak ditemukan." });
+    }
+    const now = new Date();
+    const plan = await generateTaskStudyPlan({ task, now });
+    return res.json({
+      server_time: now.toISOString(),
+      plan
+    });
   } catch (err) {
     return next(err);
   }
