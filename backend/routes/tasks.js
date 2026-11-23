@@ -1,136 +1,101 @@
 import { Router } from "express";
-import { readDB, writeDB } from "../db.js";
+import {
+  createTask,
+  deleteTask,
+  findCourseByIdForUser,
+  findTaskByIdForUser,
+  getTasksWithCourseByUser,
+  updateTask
+} from "../db.js";
 import { requireAuth } from "../middleware/auth.js";
 
 const router = Router();
 
-// Seluruh endpoint tugas membutuhkan login.
 router.use(requireAuth);
 
-/**
- * GET /api/tasks
- * Daftar seluruh tugas milik pengguna yang sedang login, lintas semua mata
- * kuliah. Setiap tugas menyertakan `mata_kuliah` (nama mata kuliahnya).
- *
- * Urutan saat ini: `created_at` terbaru di atas.
- *
- * Response : 200 { tasks }
- *
- * CATATAN UNTUK PESERTA STUDI KASUS:
- * Ini adalah titik yang relevan untuk fitur "Reminder Tugas Mendekati Deadline".
- * Silakan tambahkan logic untuk menandai/mengurutkan ulang tugas yang
- * sisa waktunya < 24 jam di sini (atau di tempat lain sesuai rancangan Anda).
- */
-router.get("/", (req, res) => {
-  const db = readDB();
-  const tasks = db.tasks
-    .filter((t) => t.user_id === req.user.id)
-    .map((t) => {
-      const course = db.courses.find((c) => c.id === t.mata_kuliah_id);
-      return { ...t, mata_kuliah: course ? course.name : null };
-    })
-    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-
-  res.json({ tasks });
+router.get("/", async (req, res, next) => {
+  try {
+    const rawTasks = await getTasksWithCourseByUser(req.user.id);
+    const tasks = [...rawTasks].sort(
+      (a, b) => new Date(b.created_at) - new Date(a.created_at)
+    );
+    return res.json({ tasks });
+  } catch (err) {
+    return next(err);
+  }
 });
 
-/**
- * GET /api/tasks/:id
- * Detail satu tugas milik pengguna yang sedang login.
- *
- * Response : 200 { task } | 404 tidak ditemukan
- */
-router.get("/:id", (req, res) => {
-  const id = Number(req.params.id);
-  const db = readDB();
-  const task = db.tasks.find((t) => t.id === id && t.user_id === req.user.id);
-  if (!task) {
-    return res.status(404).json({ error: "Tugas tidak ditemukan." });
+router.get("/:id", async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const task = await findTaskByIdForUser(id, req.user.id);
+    if (!task) {
+      return res.status(404).json({ error: "Tugas tidak ditemukan." });
+    }
+    return res.json({ task });
+  } catch (err) {
+    return next(err);
   }
-  res.json({ task });
 });
 
-/**
- * POST /api/tasks
- * Menambahkan tugas baru dengan status awal "belum".
- *
- * Body     : { mata_kuliah_id, judul, deadline, deskripsi? }
- * Response : 201 { task } | 400 input tidak valid atau mata kuliah bukan milik user
- */
-router.post("/", (req, res) => {
-  const { mata_kuliah_id, judul, deskripsi, deadline } = req.body;
-  if (!mata_kuliah_id || !judul || !deadline) {
-    return res.status(400).json({ error: "mata_kuliah_id, judul, dan deadline wajib diisi." });
-  }
+router.post("/", async (req, res, next) => {
+  try {
+    const { mata_kuliah_id, judul, deskripsi, deadline } = req.body;
+    if (!mata_kuliah_id || !judul || !deadline) {
+      return res.status(400).json({
+        error: "mata_kuliah_id, judul, dan deadline wajib diisi."
+      });
+    }
 
-  const db = readDB();
-  const course = db.courses.find((c) => c.id === Number(mata_kuliah_id) && c.user_id === req.user.id);
-  if (!course) {
-    return res.status(400).json({ error: "Mata kuliah tidak ditemukan untuk user ini." });
-  }
+    const course = await findCourseByIdForUser(Number(mata_kuliah_id), req.user.id);
+    if (!course) {
+      return res.status(400).json({
+        error: "Mata kuliah tidak ditemukan untuk user ini."
+      });
+    }
 
-  const newTask = {
-    id: db.nextIds.task++,
-    user_id: req.user.id,
-    mata_kuliah_id: Number(mata_kuliah_id),
-    judul,
-    deskripsi: deskripsi || "",
-    deadline,
-    status: "belum",
-    created_at: new Date().toISOString()
-  };
-  db.tasks.push(newTask);
-  writeDB(db);
-  res.status(201).json({ task: newTask });
+    const task = await createTask({
+      userId: req.user.id,
+      mataKuliahId: Number(mata_kuliah_id),
+      judul,
+      deskripsi,
+      deadline
+    });
+    return res.status(201).json({ task });
+  } catch (err) {
+    return next(err);
+  }
 });
 
-/**
- * PUT /api/tasks/:id
- * Memperbarui tugas, termasuk mengubah status. Hanya field yang dikirim yang
- * diubah.
- *
- * Body     : { judul?, deskripsi?, deadline?, status? } (status: "belum" | "selesai")
- * Response : 200 { task } | 400 status tidak valid | 404 tidak ditemukan
- */
-router.put("/:id", (req, res) => {
-  const id = Number(req.params.id);
-  const db = readDB();
-  const task = db.tasks.find((t) => t.id === id && t.user_id === req.user.id);
-  if (!task) {
-    return res.status(404).json({ error: "Tugas tidak ditemukan." });
-  }
-
-  const { judul, deskripsi, deadline, status } = req.body;
-  if (judul !== undefined) task.judul = judul;
-  if (deskripsi !== undefined) task.deskripsi = deskripsi;
-  if (deadline !== undefined) task.deadline = deadline;
-  if (status !== undefined) {
-    if (!["belum", "selesai"].includes(status)) {
+router.put("/:id", async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const { judul, deskripsi, deadline, status } = req.body;
+    if (status !== undefined && !["belum", "selesai"].includes(status)) {
       return res.status(400).json({ error: "Status hanya boleh 'belum' atau 'selesai'." });
     }
-    task.status = status;
+
+    const task = await updateTask(id, req.user.id, { judul, deskripsi, deadline, status });
+    if (!task) {
+      return res.status(404).json({ error: "Tugas tidak ditemukan." });
+    }
+    return res.json({ task });
+  } catch (err) {
+    return next(err);
   }
-  writeDB(db);
-  res.json({ task });
 });
 
-/**
- * DELETE /api/tasks/:id
- * Menghapus satu tugas.
- *
- * Response : 200 { success: true } | 404 tidak ditemukan
- */
-router.delete("/:id", (req, res) => {
-  const id = Number(req.params.id);
-  const db = readDB();
-  const task = db.tasks.find((t) => t.id === id && t.user_id === req.user.id);
-  if (!task) {
-    return res.status(404).json({ error: "Tugas tidak ditemukan." });
+router.delete("/:id", async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const deleted = await deleteTask(id, req.user.id);
+    if (!deleted) {
+      return res.status(404).json({ error: "Tugas tidak ditemukan." });
+    }
+    return res.json({ success: true });
+  } catch (err) {
+    return next(err);
   }
-
-  db.tasks = db.tasks.filter((t) => t.id !== id);
-  writeDB(db);
-  res.json({ success: true });
 });
 
 export default router;
