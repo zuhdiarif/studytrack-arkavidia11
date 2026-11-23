@@ -21,4 +21,9 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+export async function requestTaskAiPlan(taskId) {
+  const res = await api.post(`/tasks/${taskId}/ai-plan`);
+  return res.data;
+}
+
 export default api;
