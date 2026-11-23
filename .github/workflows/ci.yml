@@ -1,0 +1,107 @@
+name: StudyTrack CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: studytrack-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-test:
+    name: Backend Syntax, Tests & SQL Migration Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Verify backend JS syntax
+        working-directory: backend
+        run: |
+          for file in config.js db.js server.js middleware/*.js routes/*.js utils/*.js scripts/*.js tests/*.js; do
+            node --check "$file"
+          done
+
+      - name: Run deadline verification and HTTP integration tests
+        working-directory: backend
+        run: npm test
+
+      - name: Validate SQL migration constraints and indexes
+        run: |
+          node -e '
+            const fs = require("fs");
+            const sql = fs.readFileSync("supabase/migrations/001_initial_studytrack_schema.sql", "utf8");
+            const required = [
+              "idx_tugas_mk_deadline",
+              "idx_tasks_user_deadline",
+              "ALTER TABLE public.users ENABLE ROW LEVEL SECURITY",
+              "ALTER TABLE public.courses ENABLE ROW LEVEL SECURITY",
+              "ALTER TABLE public.tasks ENABLE ROW LEVEL SECURITY"
+            ];
+            for (const token of required) {
+              if (!sql.includes(token)) {
+                throw new Error("Missing required SQL directive: " + token);
+              }
+            }
+            for (const forbidden of ["is_near_deadline", "deadline_category"]) {
+              if (sql.includes(forbidden)) {
+                throw new Error("Forbidden derived reminder column found in DB migration: " + forbidden);
+              }
+            }
+            console.log("SQL migration checks passed.");
+          '
+
+  frontend-build:
+    name: Frontend Vite Production Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build production bundle
+        working-directory: frontend
+        run: npm run build
+
+      - name: Verify build output
+        run: |
+          test -f frontend/dist/index.html
+          node -e '
+            const fs = require("fs");
+            const css = fs.readFileSync("frontend/src/index.css", "utf8");
+            if (/\/\*|\*\//.test(css)) {
+              throw new Error("Unexpected CSS comment found in frontend/src/index.css");
+            }
+            console.log("Frontend build artifact and CSS check passed.");
+          '
