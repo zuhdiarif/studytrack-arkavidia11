@@ -8,6 +8,7 @@ import {
   updateTask
 } from "../db.js";
 import { requireAuth } from "../middleware/auth.js";
+import { enrichAndSortTasks, enrichTaskWithDeadline } from "../utils/deadline.js";
 
 const router = Router();
 
@@ -15,11 +16,13 @@ router.use(requireAuth);
 
 router.get("/", async (req, res, next) => {
   try {
+    const now = new Date();
     const rawTasks = await getTasksWithCourseByUser(req.user.id);
-    const tasks = [...rawTasks].sort(
-      (a, b) => new Date(b.created_at) - new Date(a.created_at)
-    );
-    return res.json({ tasks });
+    const tasks = enrichAndSortTasks(rawTasks, now);
+    return res.json({
+      server_time: now.toISOString(),
+      tasks
+    });
   } catch (err) {
     return next(err);
   }
@@ -32,7 +35,7 @@ router.get("/:id", async (req, res, next) => {
     if (!task) {
       return res.status(404).json({ error: "Tugas tidak ditemukan." });
     }
-    return res.json({ task });
+    return res.json({ task: enrichTaskWithDeadline(task, new Date()) });
   } catch (err) {
     return next(err);
   }
