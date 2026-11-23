@@ -38,11 +38,11 @@ jobs:
       - name: Verify backend JS syntax
         working-directory: backend
         run: |
-          for file in config.js db.js server.js middleware/*.js routes/*.js utils/*.js scripts/*.js tests/*.js; do
+          for file in config.js db.js server.js middleware/*.js routes/*.js services/*.js utils/*.js scripts/*.js tests/*.js; do
             node --check "$file"
           done
 
-      - name: Run deadline verification and HTTP integration tests
+      - name: Run deadline, AI planner, and HTTP integration tests
         working-directory: backend
         run: npm test
 
